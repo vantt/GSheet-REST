@@ -1,3 +1,5 @@
+## TypeScript support
+https://github.com/google/clasp/blob/master/docs/typescript.md
 
 ## G-Sheet Rest.API Sample project
 ### Required Libraries

@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es5",
+    "sourceMap": true,
+    "allowJs": true,
+    "checkJs": true,
+    "types": ["google-apps-script"]
+  },
+  "exclude": [
+    "node_modules"
+  ]
+}

@@ -11,7 +11,7 @@ var Sample = new ModelDefinition(
     2,
     {
         autoIncrement: false,
-        colShift: 0
+        colShift: 0,
     },
     {
         validate: function (on) {

@@ -11,9 +11,9 @@ function ModelDefinition(path, sheetName, idColumn, rowShift, tamotsu_classPrope
             rowShift: rowShift,
         };
 
-        for (var column in tamotsu_classProperties) {
-            options.column = tamotsu_classProperties.column;
-        }
+        Object.keys(tamotsu_classProperties).map(function (column) {
+            options[column] = tamotsu_classProperties[column];
+        });
 
         return Tamotsu.Table.define(options, tamotsu_instanceProperties);
     }
@@ -58,28 +58,66 @@ function GexpressTamotsuMiddleware(path, opts) {
         }
     };
 
+    function paging(items, offset, limit) {
+        var nextOffset = offset + limit;
+        var total = items.length;
+        var data = items.slice(offset, nextOffset);
+
+        return {
+            data: data,
+            meta: {
+                limit: limit,
+                offset: offset,
+                size: data.length,
+                nextOffset: (nextOffset >= total) ? -1 : nextOffset,
+                total: total,
+            }
+        }
+    }
+
     function columnFilter(items) {
         var excludedColumns = [];
+        var result = [];
 
-        // collect the excluded_columns from the first row
-        Object.keys(items[0]).map(function (column) {
-            const pattern = new RegExp("^excluded_");
-            if (pattern.test(column)) {
-                excludedColumns.push(column)
-            }
-        });
-
-        // remove all excluded_columns
-        return items.map(function (model) {
-            excludedColumns.forEach(function (column) {
-                delete model[column]
+        if (items.length) {
+            // collect the excluded_columns from the first row
+            Object.keys(items[0]).map(function (column) {
+                const pattern = new RegExp("^excluded_");
+                if (pattern.test(column)) {
+                    excludedColumns.push(column)
+                }
             });
-            return model
-        })
+
+            // remove all excluded_columns
+            result = items.map(function (model) {
+                excludedColumns.forEach(function (column) {
+                    delete model[column]
+                });
+                return model
+            })
+        }
+
+        return result;
+    }
+
+    function parseRequest(request, options) {
+        var limit = parseInt(request.query.limit || opts.limit || 25);
+        var offset = parseInt(request.query.offset || 0);
+        var query = request.query.query || options.query || {};
+        var order = request.query.order || options.order || false;
+
+        return {
+            limit: limit,
+            offset: offset,
+            query: query,
+            order: order,
+            scriptUrl: ScriptApp.getService().getUrl() + "?" + decodeURIComponent(request.e.queryString),
+        };
     }
 
     endpoint = function (req, res, next) {
         var tamotsuTable = opts.tamotsu;
+        var requestParams = parseRequest(req, opts);
 
         // spy .end() function to prevent calling twice
         var end = res.end;
@@ -104,7 +142,14 @@ function GexpressTamotsuMiddleware(path, opts) {
                         delete params.method;
                         delete params.path;
 
-                        return model.updateAttributes(params);
+                        model.updateAttributes(params);
+
+                        return {
+                            links: {
+                                self: requestParams['scriptUrl'],
+                            },
+                            data: columnFilter([tamotsuTable.find(req.params.id)]) ,
+                        };
                     }
 
                     throw 'Not found id:' + req.params.id;
@@ -116,7 +161,13 @@ function GexpressTamotsuMiddleware(path, opts) {
                     try {
                         items = [tamotsuTable.find(req.params.id)];
                         items = columnFilter(items);
-                        return items[0];
+
+                        return {
+                            links: {
+                                self: requestParams['scriptUrl'],
+                            },
+                            data: items[0]
+                        };
                     } catch (e) {
                         return {error: e}
                     }
@@ -128,19 +179,21 @@ function GexpressTamotsuMiddleware(path, opts) {
         if (req.url === path && req.method === 'GET') {
             // return a List of Records
             var handler = function () {
-                var limit = req.query.limit || opts.limit || 25;
-                var offset = req.query.offset || 0;
-                var query = req.query.query || opts.query || {};
-                var order = req.query.order || opts.order || false;
+                var items = tamotsuTable.where(requestParams['query']);
 
-                var items = tamotsuTable.where(query);
+                if (requestParams['order']) items.order(requestParams['order']);
 
-                if (order) items.order(order);
+                items = paging(items.all(), requestParams['offset'], requestParams['limit']);
+                items['data'] = columnFilter(items['data']);
 
-                items = items.all().slice(offset, offset + limit);
-                filteredItems = columnFilter(items);
-
-                return {limit: limit, offset: offset, order: order, nitems: items.length, data: filteredItems}
+                return {
+                    meta: items['meta'],
+                    links: {
+                        self: requestParams['scriptUrl'],
+                        next: (items['meta']['nextOffset'] < 0) ? "" : requestParams['scriptUrl'].replace(/offset=\d+/, "offset=" + items['meta']['nextOffset']),
+                    },
+                    data: items['data'],
+                };
             };
 
             runHandler(req, res, handler);
